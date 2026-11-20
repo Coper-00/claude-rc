@@ -58,6 +58,27 @@
     cursor: pointer;
   }
   button:active { transform: translateY(4px); box-shadow: 0 2px 0 #c99a10; }
+  #skillBtn {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: calc(52px + env(safe-area-inset-top));
+    width: 150px; height: 40px; margin: 0; padding: 0;
+    border-radius: 20px; border: 2px solid rgba(255,255,255,.35);
+    background: rgba(0,0,0,.35); box-shadow: none;
+    color: #fff; font-size: 15px; font-weight: 700;
+    overflow: hidden; display: none;
+  }
+  #skillBtn.show { display: block; }
+  #skillBtn:active { transform: translateX(-50%) translateY(2px); box-shadow: none; }
+  #skillFill {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: linear-gradient(90deg, #6a5cff, #b04cff);
+    transition: width .2s;
+  }
+  #skillLabel { position: relative; }
+  #skillBtn.ready { border-color: var(--accent); animation: glow .8s ease-in-out infinite alternate; }
+  #skillBtn.ready #skillFill { background: linear-gradient(90deg, #ffb300, #ffdd55); }
+  #skillBtn.ready #skillLabel { color: #1e2a44; }
+  @keyframes glow { from { box-shadow: 0 0 4px var(--accent); } to { box-shadow: 0 0 18px var(--accent); } }
   #newBest { color: var(--accent); font-weight: 700; }
 </style>
 </head>
@@ -70,6 +91,8 @@
     <div>최고 <span id="best">0</span></div>
   </div>
 
+  <button id="skillBtn"><div id="skillFill"></div><span id="skillLabel">🌀 흡입 0/10</span></button>
+
   <div id="startScreen" class="overlay">
     <h1>이력서 캐치</h1>
     <p>하늘에서 떨어지는 이력서를 바구니로 받으세요.<br>손가락(또는 마우스·방향키)으로 바구니를 움직입니다.</p>
@@ -77,6 +100,7 @@
       <span>📄 이력서</span><span>+10점</span>
       <span>⭐ 핵심인재 이력서</span><span>+50점</span>
       <span>🚫 스팸메일</span><span>받으면 목숨 -1</span>
+      <span>🌀 흡입 스킬</span><span>이력서 10개 받으면 사용 가능<br>화면의 이력서를 모두 빨아들임</span>
     </div>
     <p>이력서를 3번 놓치면 게임오버</p>
     <p class="big">최고점수 <span id="bestStart">0</span></p>
@@ -126,8 +150,29 @@
   const basket = { x: 0, y: 0, w: 120, h: 60, targetX: null };
   let items = [], particles = [], popups = [];
   let score = 0, lives = 3, best = loadBest();
+  const SKILL_NEED = 10;
+  let charge = 0, vortex = 0;
   let running = false, lastT = 0, spawnTimer = 0, elapsed = 0, shake = 0;
   const keys = { left: false, right: false };
+
+  function updateSkill() {
+    const ready = charge >= SKILL_NEED;
+    $('skillFill').style.width = (Math.min(charge, SKILL_NEED) / SKILL_NEED * 100) + '%';
+    $('skillLabel').textContent = ready ? '🌀 흡입 사용!' : `🌀 흡입 ${charge}/${SKILL_NEED}`;
+    $('skillBtn').classList.toggle('ready', ready);
+    $('skillBtn').classList.toggle('show', running);
+  }
+
+  function useSkill() {
+    if (!running || charge < SKILL_NEED) return;
+    let n = 0;
+    items.forEach(it => { if (it.type !== 'spam' && !it.sucked) { it.sucked = true; it.suckV = 0; n++; } });
+    charge = 0;
+    vortex = 0.8;
+    vibrate([30, 40, 30]);
+    popup(basket.x, basket.y - 50, n ? `흡입! x${n}` : '흡입!', '#c9a6ff');
+    updateSkill();
+  }
 
   function updateHud() {
     $('score').textContent = score;
@@ -155,13 +200,23 @@
     });
   }
 
+  function collect(it, bySkill) {
+    const pts = it.type === 'gold' ? 50 : 10;
+    const color = it.type === 'gold' ? '#ffcc33' : bySkill ? '#c9a6ff' : '#ffffff';
+    score += pts;
+    if (!bySkill) { charge++; vibrate(15); updateSkill(); }
+    burst(basket.x + (bySkill ? 0 : it.x - basket.x), basket.y, color, it.type === 'gold' ? 20 : bySkill ? 6 : 10);
+    popup(bySkill ? basket.x + (Math.random() - 0.5) * basket.w : it.x, basket.y - 10, '+' + pts, color);
+    updateHud();
+  }
+
   function burst(x, y, color, n = 12) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, s = 80 + Math.random() * 180;
       particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 80, life: 0.6, color });
     }
   }
-  function popup(x, y, text, color) { popups.push({ x, y, text, color, life: 0.9 }); }
+  function popup(x, y, text, color) { popups.push({ x: Math.max(60, Math.min(W - 60, x)), y, text, color, life: 0.9 }); }
 
   function vibrate(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
 
@@ -177,17 +232,19 @@
   // ---------- 게임 흐름 ----------
   function start() {
     items = []; particles = []; popups = [];
-    score = 0; lives = 3; elapsed = 0; spawnTimer = 0.4; shake = 0;
+    score = 0; lives = 3; elapsed = 0; spawnTimer = 0.4; shake = 0; charge = 0; vortex = 0;
     basket.x = W / 2; basket.targetX = null;
     updateHud();
     $('startScreen').classList.add('hidden');
     $('overScreen').classList.add('hidden');
     running = true;
+    updateSkill();
     lastT = performance.now();
   }
 
   function gameOver() {
     running = false;
+    updateSkill();
     const isNew = score > best;
     if (isNew) { best = score; saveBest(best); }
     $('finalScore').textContent = score;
@@ -218,6 +275,21 @@
     const left = basket.x - basket.w / 2, right = basket.x + basket.w / 2;
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
+      if (it.sucked) {
+        // 바구니 쪽으로 가속하며 빨려 들어감
+        const tx = basket.x, ty = basket.y + 4;
+        const dx = tx - it.x, dy = ty - it.y, d = Math.hypot(dx, dy);
+        it.suckV += 2400 * dt;
+        const step = Math.min(d, it.suckV * dt);
+        it.x += dx / (d || 1) * step; it.y += dy / (d || 1) * step;
+        it.rot += 12 * dt;
+        it.scale = Math.max(0.3, Math.min(1, d / 200));
+        if (d < 12) {
+          items.splice(i, 1);
+          collect(it, true);
+        }
+        continue;
+      }
       it.y += it.vy * dt;
       it.sway += dt * 2;
       it.x += Math.sin(it.sway) * 20 * dt;
@@ -231,12 +303,7 @@
           burst(it.x, basket.y, '#ff5a5a');
           loseLife(it.x, basket.y - 10, '스팸! -1');
         } else {
-          const pts = it.type === 'gold' ? 50 : 10;
-          score += pts;
-          vibrate(15);
-          burst(it.x, basket.y, it.type === 'gold' ? '#ffcc33' : '#ffffff', it.type === 'gold' ? 20 : 10);
-          popup(it.x, basket.y - 10, '+' + pts, it.type === 'gold' ? '#ffcc33' : '#ffffff');
-          updateHud();
+          collect(it, false);
         }
         if (!running) return;
         continue;
@@ -262,6 +329,7 @@
       if (p.life <= 0) popups.splice(i, 1);
     }
     if (shake > 0) shake -= dt;
+    if (vortex > 0) vortex -= dt;
   }
 
   // ---------- 그리기 ----------
@@ -302,6 +370,7 @@
     ctx.save();
     ctx.translate(it.x, it.y);
     ctx.rotate(it.rot);
+    if (it.scale) ctx.scale(it.scale, it.scale);
     const w = it.w, h = it.h;
     ctx.shadowColor = 'rgba(0,0,0,0.3)';
     ctx.shadowBlur = 6; ctx.shadowOffsetY = 3;
@@ -375,10 +444,32 @@
     roundRect(x - top / 2 - 4, y - 6, top + 8, 10, 5); ctx.fill();
   }
 
+  function drawVortex() {
+    const a = Math.min(1, vortex / 0.3);
+    const t = performance.now() / 1000;
+    ctx.save();
+    ctx.translate(basket.x, basket.y);
+    ctx.lineWidth = 3;
+    for (let k = 0; k < 4; k++) {
+      const r = ((t * 260 + k * 70) % 280);
+      ctx.strokeStyle = `rgba(190,150,255,${a * (1 - r / 280) * 0.8})`;
+      ctx.beginPath();
+      ctx.ellipse(0, -r * 0.35, 300 - r, (300 - r) * 0.35, 0, Math.PI, Math.PI * 2);
+      ctx.stroke();
+    }
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 160);
+    g.addColorStop(0, `rgba(176,76,255,${0.45 * a})`);
+    g.addColorStop(1, 'rgba(176,76,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, 160, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   function draw() {
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10);
     drawBackground();
+    if (vortex > 0) drawVortex();
     items.forEach(drawItem);
     drawBasket();
     particles.forEach(p => {
@@ -420,6 +511,7 @@
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
     if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
     if ((e.key === ' ' || e.key === 'Enter') && !running) start();
+    else if ((e.key === ' ' || e.key === 's' || e.key === 'ArrowUp') && running) { e.preventDefault(); useSkill(); }
   });
   window.addEventListener('keyup', e => {
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
@@ -427,6 +519,7 @@
   });
   $('startBtn').addEventListener('click', start);
   $('retryBtn').addEventListener('click', start);
+  $('skillBtn').addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); useSkill(); });
 
   // 탭 전환 시 시간 점프 방지
   document.addEventListener('visibilitychange', () => { lastT = performance.now(); });
