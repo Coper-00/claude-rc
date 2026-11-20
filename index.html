@@ -48,6 +48,14 @@
     border: 2px solid rgba(255,255,255,.2);
   }
   #letters span.on { background: #ff7a00; color: #fff; border-color: #ffd27a; box-shadow: 0 0 10px #ff9a2a; }
+  #muteBtn {
+    position: absolute; right: 16px; top: calc(54px + env(safe-area-inset-top));
+    width: 38px; height: 38px; margin: 0; padding: 0;
+    border-radius: 50%; border: 2px solid rgba(255,255,255,.3);
+    background: rgba(0,0,0,.35); box-shadow: none;
+    font-size: 18px; line-height: 1; z-index: 5;
+  }
+  #muteBtn:active { transform: translateY(2px); box-shadow: none; }
   #skillBtn {
     position: absolute; left: 50%; transform: translateX(-50%);
     top: calc(52px + env(safe-area-inset-top));
@@ -108,6 +116,7 @@
     <div>최고 <span id="best">0</span></div>
   </div>
   <div id="letters"><span>보</span><span>너</span><span>스</span></div>
+  <button id="muteBtn" aria-label="소리 켜기/끄기">🔊</button>
   <button id="skillBtn"><div id="skillFill"></div><span id="skillLabel">🌀 영끌 0/10</span></button>
 
   <div id="startScreen" class="overlay">
@@ -119,6 +128,7 @@
       <span>🧾 세금고지서</span><span>닿으면 목숨 -1</span>
       <span>❤️ 하트</span><span>목숨 +1</span>
       <span>보·너·스</span><span>글자 3개 모으면 30초 보너스 타임</span>
+      <span>🔊 소리</span><span>오른쪽 위 버튼으로 켜기/끄기</span>
       <span>🌀 영끌 스킬</span><span>10개 받으면 사용, 화면의 돈을 싹 끌어모음</span>
     </div>
     <p>월급을 3번 놓치면 게임오버</p>
@@ -158,6 +168,162 @@
     bestMem = v;
     try { localStorage.setItem(BEST_KEY, String(v)); } catch (e) {}
   }
+
+  // ---------- 사운드 (Web Audio로 직접 합성, 외부 파일 없음) ----------
+  const Sound = (() => {
+    const MUTE_KEY = 'salaryCatchMute';
+    let ac = null, master, musicBus, sfxBus, noiseBuf;
+    let muted = false;
+    try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {}
+    let playing = false, bonusMode = false, step = 0, nextTime = 0, timer = null, lastCoin = 0;
+
+    const freq = m => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      ac = new AC();
+      master = ac.createGain(); master.gain.value = muted ? 0 : 1; master.connect(ac.destination);
+      const comp = ac.createDynamicsCompressor(); comp.connect(master);
+      musicBus = ac.createGain(); musicBus.gain.value = 0.32; musicBus.connect(comp);
+      sfxBus = ac.createGain(); sfxBus.gain.value = 0.6; sfxBus.connect(comp);
+      noiseBuf = ac.createBuffer(1, ac.sampleRate * 0.5, ac.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+
+    function tone(bus, type, f, t, dur, vol, f2) {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(bus);
+      o.start(t); o.stop(t + dur + 0.02);
+    }
+    function noise(bus, t, dur, vol, hp, lp) {
+      const src = ac.createBufferSource(); src.buffer = noiseBuf;
+      const f = ac.createBiquadFilter(); f.type = lp ? 'lowpass' : 'highpass'; f.frequency.value = lp || hp;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(f); f.connect(g); g.connect(bus);
+      src.start(t); src.stop(t + dur + 0.02);
+    }
+
+    // 밝은 장조 8비트풍 루프 (C-G-Am-F 진행, 8분음표 64스텝 = 8마디)
+    const _ = null;
+    const MELODY = [
+      72,_,76,79, _,79,81,79,   79,_,74,_, 77,76,74,_,
+      76,_,72,76, _,81,79,76,   77,_,76,74, _,72,74,_,
+      72,_,76,79, _,84,83,81,   79,_,74,77, 79,_,74,_,
+      76,_,72,76, 81,_,79,76,   77,76,74,72, 74,76,72,_
+    ];
+    const CHORD_ROOT = [48, 43, 45, 41]; // C G A F (베이스)
+    const ARP = [[60,64,67],[59,62,67],[60,64,69],[60,65,69]];
+
+    function scheduleStep(i, t) {
+      const tr = bonusMode ? 2 : 0;          // 보너스 타임엔 한 음 올림
+      const bar = Math.floor(i / 8) % 4, s8 = i % 8;
+      const m = MELODY[i];
+      const stepDur = 60 / (bonusMode ? 168 : 128) / 2;
+      if (m !== null) tone(musicBus, 'square', freq(m + tr), t, stepDur * 1.6, 0.09);
+      // 베이스: 8분음표로 근음-옥타브 펌핑
+      const root = CHORD_ROOT[bar] + tr;
+      tone(musicBus, 'triangle', freq(s8 % 2 ? root + 12 : root), t, stepDur * 0.9, 0.32);
+      // 배경 아르페지오 (작게)
+      const a = ARP[bar][s8 % 3] + tr + (bonusMode ? 12 : 0);
+      tone(musicBus, 'sine', freq(a), t, stepDur * 0.8, bonusMode ? 0.06 : 0.04);
+      // 드럼
+      if (s8 === 0 || s8 === 4 || (bonusMode && s8 % 2 === 0)) tone(musicBus, 'sine', 150, t, 0.14, 0.5, 40);
+      if (s8 === 2 || s8 === 6) noise(musicBus, t, 0.09, 0.12, 0, 1800);   // 스네어
+      if (s8 % 2 === 1 || bonusMode) noise(musicBus, t, 0.035, 0.06, 7000); // 하이햇
+    }
+
+    function pump() {
+      if (!ac || !playing) return;
+      while (nextTime < ac.currentTime + 0.15) {
+        scheduleStep(step, nextTime);
+        nextTime += 60 / (bonusMode ? 168 : 128) / 2;
+        step = (step + 1) % MELODY.length;
+      }
+    }
+
+    return {
+      unlock() { init(); },
+      startMusic() {
+        if (!ac) return;
+        playing = true; bonusMode = false; step = 0; nextTime = ac.currentTime + 0.08;
+        clearInterval(timer); timer = setInterval(pump, 25); pump();
+      },
+      stopMusic() { playing = false; clearInterval(timer); timer = null; },
+      setBonus(on) { bonusMode = on; },
+      suspend() { if (ac && ac.state === 'running') ac.suspend(); },
+      resume() { if (ac && ac.state === 'suspended') ac.resume(); if (playing && ac) nextTime = Math.max(nextTime, ac.currentTime + 0.05); },
+      isMuted() { return muted; },
+      toggleMute() {
+        muted = !muted;
+        try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (e) {}
+        if (ac) master.gain.setTargetAtTime(muted ? 0 : 1, ac.currentTime, 0.02);
+        return muted;
+      },
+      // 효과음
+      coin(gold) {
+        if (!ac) return;
+        const t = ac.currentTime;
+        if (t - lastCoin < 0.035) return;   // 보너스 타임에 소리가 뭉개지지 않게
+        lastCoin = t;
+        if (gold) {
+          [88, 92, 95, 100].forEach((m, k) => tone(sfxBus, 'square', freq(m), t + k * 0.05, 0.18, 0.12));
+        } else {
+          tone(sfxBus, 'square', freq(83), t, 0.07, 0.12);         // 띠
+          tone(sfxBus, 'square', freq(88), t + 0.07, 0.28, 0.12);  // 링~
+        }
+      },
+      heart() {
+        if (!ac) return;
+        const t = ac.currentTime;
+        [72, 76, 79, 84].forEach((m, k) => tone(sfxBus, 'triangle', freq(m), t + k * 0.06, 0.25, 0.3));
+      },
+      letter(i) {
+        if (!ac) return;
+        const t = ac.currentTime;
+        tone(sfxBus, 'sine', freq(84 + i * 4), t, 0.4, 0.3);
+        tone(sfxBus, 'sine', freq(91 + i * 4), t + 0.05, 0.4, 0.2);
+      },
+      hurt() {
+        if (!ac) return;
+        const t = ac.currentTime;
+        tone(sfxBus, 'sawtooth', 220, t, 0.35, 0.18, 70);
+        noise(sfxBus, t, 0.2, 0.15, 0, 800);
+      },
+      whoosh() {
+        if (!ac) return;
+        const t = ac.currentTime;
+        const src = ac.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 4;
+        f.frequency.setValueAtTime(300, t); f.frequency.exponentialRampToValueAtTime(3000, t + 0.6);
+        const g = ac.createGain();
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.15);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+        src.connect(f); f.connect(g); g.connect(sfxBus);
+        src.start(t); src.stop(t + 0.85);
+      },
+      fanfare() {
+        if (!ac) return;
+        const t = ac.currentTime;
+        [72, 76, 79, 84, 79, 84].forEach((m, k) => tone(sfxBus, 'square', freq(m), t + k * 0.09, k === 5 ? 0.5 : 0.14, 0.12));
+      },
+      gameOver() {
+        if (!ac) return;
+        const t = ac.currentTime;
+        [72, 67, 64, 60].forEach((m, k) => tone(sfxBus, 'triangle', freq(m), t + k * 0.18, 0.3, 0.3));
+      }
+    };
+  })();
 
   // ---------- 상태 ----------
   const pig = { x: 0, y: 0, w: 120, h: 75, targetX: null, face: 1, bob: 0 };
@@ -275,6 +441,7 @@
     shake = 0.3;
     vibrate(120);
     popup(x, y, text, '#ff5a5a');
+    Sound.hurt();
     updateHud();
     if (lives <= 0) gameOver();
   }
@@ -282,6 +449,7 @@
   function collect(it, bySkill) {
     const cx = bySkill ? pig.x : it.x, cy = pig.y;
     if (it.type === 'money' || it.type === 'gold') {
+      Sound.coin(it.type === 'gold');
       const pts = it.type === 'gold' ? 50 : 10;
       const color = it.type === 'gold' ? '#ffcc33' : bySkill ? '#c9a6ff' : '#9dffb0';
       score += pts;
@@ -290,11 +458,13 @@
       burst(cx, cy, color, it.type === 'gold' ? 18 : bySkill ? 5 : 8);
       popup(bySkill ? pig.x + (Math.random() - 0.5) * pig.w : it.x, cy - 10, '+' + pts, color);
     } else if (it.type === 'heart') {
+      Sound.heart();
       if (lives < MAX_LIVES) { lives++; popup(cx, cy - 20, '❤️ +1', '#ff7a9a', 26); }
       else { score += 30; popup(cx, cy - 20, '+30', '#ff7a9a'); }
       burst(cx, cy, '#ff7a9a', 16);
       vibrate(30);
     } else if (it.type === 'letter') {
+      Sound.letter(it.idx);
       got[it.idx] = true;
       popup(cx, cy - 20, WORD[it.idx] + '!', '#ffb347', 30);
       burst(cx, cy, '#ffb347', 16);
@@ -306,6 +476,8 @@
   }
 
   function startBonus() {
+    Sound.fanfare();
+    Sound.setBonus(true);
     bonus = BONUS_TIME;
     got = [false, false, false];
     spawnTimer = 0.3;
@@ -320,6 +492,7 @@
     items.forEach(it => { if (it.type !== 'tax' && !it.sucked) { it.sucked = true; it.suckV = 0; n++; } });
     charge = 0;
     vortex = 0.8;
+    Sound.whoosh();
     vibrate([30, 40, 30]);
     popup(pig.x, pig.y - 50, n ? `영끌! x${n}` : '영끌!', '#c9a6ff', 26);
     updateSkill();
@@ -335,11 +508,15 @@
     $('startScreen').classList.add('hidden');
     $('overScreen').classList.add('hidden');
     running = true;
+    Sound.unlock();
+    Sound.startMusic();
     updateHud(); updateSkill(); updateLetters();
     lastT = performance.now();
   }
 
   function gameOver() {
+    Sound.stopMusic();
+    Sound.gameOver();
     running = false;
     bonus = 0;
     const isNew = score > best;
@@ -376,6 +553,7 @@
         bonus = 0;
         spawnTimer = 1.2; letterTimer = 10;
         popup(W / 2, H * 0.4, '보너스 종료', '#ffffff', 30);
+        Sound.setBonus(false);
         updateLetters();
       }
     } else {
@@ -751,7 +929,16 @@
   $('startBtn').addEventListener('click', start);
   $('retryBtn').addEventListener('click', start);
   $('skillBtn').addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); useSkill(); });
-  document.addEventListener('visibilitychange', () => { lastT = performance.now(); });
+  document.addEventListener('visibilitychange', () => {
+    lastT = performance.now();
+    if (document.hidden) Sound.suspend(); else Sound.resume();
+  });
+  function syncMuteIcon() { $('muteBtn').textContent = Sound.isMuted() ? '🔇' : '🔊'; }
+  $('muteBtn').addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    Sound.unlock(); Sound.toggleMute(); syncMuteIcon();
+  });
+  syncMuteIcon();
 
   window.addEventListener('resize', resize);
   resize();
