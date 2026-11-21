@@ -85,16 +85,19 @@
   .overlay {
     position: absolute; inset: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 14px; padding: 24px; text-align: center;
+    gap: 12px; padding: calc(70px + env(safe-area-inset-top)) 20px 24px; text-align: center;
     background: rgba(15, 22, 40, .8);
     backdrop-filter: blur(3px);
     overflow-y: auto;
+    touch-action: pan-y;
   }
+  .overlay > :first-child { margin-top: auto; }
+  .overlay > :last-child { margin-bottom: auto; }
   .overlay.hidden { display: none; }
   .overlay h1 { font-size: 34px; color: var(--accent); }
   .overlay p { font-size: 16px; line-height: 1.6; opacity: .92; }
   .overlay .big { font-size: 22px; font-weight: 700; }
-  .legend { display: grid; grid-template-columns: auto auto; gap: 6px 12px; font-size: 15px; text-align: left; }
+  .legend { display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.45; opacity: .92; }
   button {
     margin-top: 8px;
     font: inherit; font-size: 20px; font-weight: 700;
@@ -105,6 +108,41 @@
   }
   button:active { transform: translateY(4px); box-shadow: 0 2px 0 #c99a10; }
   #newBest { color: var(--accent); font-weight: 700; }
+  #level {
+    position: absolute; right: 64px; top: calc(62px + env(safe-area-inset-top));
+    font-weight: 800; font-size: 15px; pointer-events: none;
+    padding: 3px 9px; border-radius: 12px; background: rgba(0,0,0,.35); display: none;
+  }
+  #level.show { display: block; }
+  input#nameInput {
+    font: inherit; font-size: 18px; text-align: center;
+    width: 220px; padding: 12px; border-radius: 12px;
+    border: 2px solid rgba(255,255,255,.4); background: rgba(255,255,255,.95); color: #1e2a44;
+    -webkit-user-select: text; user-select: text;
+  }
+  #nameError { color: #ff8a8a; font-size: 14px; min-height: 1em; }
+  #hello { font-size: 17px; }
+  #hello a { color: #9ec5ff; font-size: 14px; margin-left: 6px; text-decoration: underline; cursor: pointer; }
+  .board {
+    width: min(320px, 100%); background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.15); border-radius: 14px; padding: 12px 14px;
+  }
+  .board h3 { font-size: 16px; margin-bottom: 8px; color: var(--accent); }
+  .board ol { list-style: none; }
+  .board li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 2px; font-size: 16px; }
+  .board li .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  .board li .sc { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .board li.me { color: var(--accent); font-weight: 700; }
+  .board li.sep { border-top: 1px dashed rgba(255,255,255,.25); margin-top: 4px; padding-top: 8px; }
+  @media (max-height: 720px) {
+    .overlay { gap: 8px; padding-top: calc(56px + env(safe-area-inset-top)); }
+    .overlay h1 { font-size: 28px; }
+    .overlay p { font-size: 14px; line-height: 1.45; }
+    .legend { font-size: 13px; gap: 2px; }
+    button { padding: 11px 36px; font-size: 18px; }
+    .board li { padding: 3px 2px; font-size: 15px; }
+  }
+  .board .note { font-size: 13px; opacity: .7; margin-top: 6px; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -116,31 +154,35 @@
     <div>최고 <span id="best">0</span></div>
   </div>
   <div id="letters"><span>보</span><span>너</span><span>스</span></div>
+  <div id="level">Lv.1</div>
   <button id="muteBtn" aria-label="소리 켜기/끄기">🔊</button>
   <button id="skillBtn"><div id="skillFill"></div><span id="skillLabel">🌀 영끌 0/10</span></button>
 
   <div id="startScreen" class="overlay">
     <h1>월급 캐치</h1>
-    <p>하늘에서 쏟아지는 월급을 돼지저금통에 모으세요.<br>손가락(또는 마우스·방향키)으로 저금통을 움직입니다.</p>
+    <p>쏟아지는 월급을 돼지저금통으로 받으세요!<br>손가락으로 저금통을 움직입니다.</p>
     <div class="legend">
-      <span>💵 월급</span><span>+10점</span>
-      <span>🪙 금괴</span><span>+50점</span>
-      <span>🧾 세금고지서</span><span>닿으면 목숨 -1</span>
-      <span>❤️ 하트</span><span>목숨 +1</span>
-      <span>보·너·스</span><span>글자 3개 모으면 30초 보너스 타임</span>
-      <span>🔊 소리</span><span>오른쪽 위 버튼으로 켜기/끄기</span>
-      <span>🌀 영끌 스킬</span><span>10개 받으면 사용, 화면의 돈을 싹 끌어모음</span>
+      <span>💵 월급 +10 · 🪙 금괴 +50 · ❤️ 하트 목숨 +1</span>
+      <span>🧾 세금고지서는 피하기 · 월급 3번 놓치면 게임오버</span>
+      <span>보·너·스 글자 모으면 10초 보너스 타임</span>
+      <span>🌀 영끌: 10개 받으면 화면의 돈 싹 흡수</span>
+      <span>⬆️ 1,000점마다 레벨 업, 점점 빨라짐</span>
     </div>
-    <p>월급을 3번 놓치면 게임오버</p>
-    <p class="big">최고점수 <span id="bestStart">0</span></p>
+    <div id="nameBox">
+      <input id="nameInput" maxlength="10" placeholder="이름(닉네임) 입력" autocomplete="nickname" enterkeyhint="go">
+      <p id="nameError"></p>
+    </div>
+    <p id="hello" hidden><span id="helloName"></span> 님 · 내 최고 <span id="bestStart">0</span>점<a id="rename">이름 변경</a></p>
     <button id="startBtn">시작</button>
+    <div class="board"><h3>🏆 랭킹 TOP 3</h3><ol id="boardStart"></ol><p class="note" id="noteStart"></p></div>
   </div>
 
   <div id="overScreen" class="overlay hidden">
     <h1>게임오버</h1>
     <p class="big">점수 <span id="finalScore">0</span></p>
     <p id="newBest"></p>
-    <p>최고점수 <span id="bestOver">0</span></p>
+    <p>내 최고점수 <span id="bestOver">0</span></p>
+    <div class="board"><h3>🏆 랭킹 TOP 3</h3><ol id="boardOver"></ol><p class="note" id="noteOver"></p></div>
     <button id="retryBtn">다시 하기</button>
   </div>
 </div>
@@ -156,7 +198,14 @@
   // ---------- 설정 ----------
   const MAX_LIVES = 3;
   const SKILL_NEED = 10;
-  const BONUS_TIME = 30;
+  const BONUS_TIME = 10;
+  const LEVEL_STEP = 1000;   // 이 점수마다 레벨 업
+
+  // ===== 공유 랭킹 설정 =====
+  // Firebase Realtime Database 주소를 따옴표 안에 붙여넣으세요.
+  // 예: 'https://my-game-default-rtdb.asia-southeast1.firebasedatabase.app'
+  // 비워 두면 이 기기 안에서만 랭킹이 저장됩니다.
+  const FIREBASE_DB_URL = '';
   const WORD = ['보', '너', '스'];
 
   // ---------- 최고점수 저장 ----------
@@ -312,6 +361,11 @@
         src.connect(f); f.connect(g); g.connect(sfxBus);
         src.start(t); src.stop(t + 0.85);
       },
+      levelUp() {
+        if (!ac) return;
+        const t = ac.currentTime;
+        [67, 71, 74, 79, 83].forEach((m, k) => tone(sfxBus, 'square', freq(m), t + k * 0.06, 0.16, 0.1));
+      },
       fanfare() {
         if (!ac) return;
         const t = ac.currentTime;
@@ -325,6 +379,108 @@
     };
   })();
 
+  // ---------- 플레이어 & 랭킹 ----------
+  const Board = (() => {
+    const ID_KEY = 'salaryCatchId', NAME_KEY = 'salaryCatchName', SENT_KEY = 'salaryCatchSent', LOCAL_KEY = 'salaryCatchLocalBoard';
+    const url = FIREBASE_DB_URL.trim().replace(/\/+$/, '');
+    const ls = {
+      get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+    };
+    let id = ls.get(ID_KEY);
+    if (!id) { id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); ls.set(ID_KEY, id); }
+    let name = ls.get(NAME_KEY) || '';
+    let cache = [];
+
+    function clean(obj) {
+      return Object.entries(obj || {})
+        .map(([k, v]) => ({ id: k, name: String((v && v.name) || '').slice(0, 12), score: Number(v && v.score) }))
+        .filter(r => r.name && Number.isFinite(r.score) && r.score > 0)
+        .sort((a, b) => b.score - a.score);
+    }
+    async function req(method, path, body) {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), 6000);
+      try {
+        const res = await fetch(`${url}/${path}.json`, {
+          method, signal: ctl.signal,
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return await res.json();
+      } finally { clearTimeout(tm); }
+    }
+    function localGet() { try { return JSON.parse(ls.get(LOCAL_KEY) || '{}'); } catch (e) { return {}; } }
+
+    return {
+      shared: !!url,
+      id: () => id,
+      name: () => name,
+      setName(n) { name = n; ls.set(NAME_KEY, n); },
+      async load() {
+        cache = url ? clean(await req('GET', 'scores')) : clean(localGet());
+        return cache;
+      },
+      // 내 최고점수가 이전에 올린 기록보다 높거나 이름이 바뀌었으면 올림
+      async submit(myBest) {
+        if (!name || myBest <= 0) return;
+        const sent = parseInt(ls.get(SENT_KEY), 10) || 0;
+        const sentName = ls.get(SENT_KEY + 'Name');
+        if (myBest <= sent && sentName === name) return;
+        const rec = { name, score: myBest, ts: Date.now() };
+        if (url) await req('PUT', 'scores/' + id, rec);
+        else { const all = localGet(); all[id] = rec; ls.set(LOCAL_KEY, JSON.stringify(all)); }
+        ls.set(SENT_KEY, String(myBest)); ls.set(SENT_KEY + 'Name', name);
+      },
+      list: () => cache
+    };
+  })();
+
+  function renderBoard(olId, noteId, state) {
+    const ol = $(olId), note = $(noteId);
+    ol.textContent = '';
+    const addRow = (rank, r, extraCls) => {
+      const li = document.createElement('li');
+      if (r.id === Board.id()) li.classList.add('me');
+      if (extraCls) li.classList.add(extraCls);
+      const nm = document.createElement('span'); nm.className = 'nm';
+      nm.textContent = (['🥇', '🥈', '🥉'][rank - 1] || rank + '위') + ' ' + r.name;
+      const sc = document.createElement('span'); sc.className = 'sc';
+      sc.textContent = r.score.toLocaleString() + '점';
+      li.append(nm, sc); ol.append(li);
+    };
+    if (state === 'loading') { note.textContent = '랭킹 불러오는 중…'; return; }
+    if (state === 'error') { note.textContent = '랭킹을 불러오지 못했습니다. 인터넷 연결을 확인하세요.'; return; }
+    const list = Board.list();
+    list.slice(0, 3).forEach((r, i) => addRow(i + 1, r));
+    const myIdx = list.findIndex(r => r.id === Board.id());
+    if (myIdx >= 3) addRow(myIdx + 1, list[myIdx], 'sep');
+    let msg = list.length ? `참가자 ${list.length}명` : '아직 기록이 없습니다. 첫 기록의 주인공이 되세요!';
+    if (!Board.shared) msg += ' · 공유 랭킹 미설정(이 기기 기록만 표시)';
+    note.textContent = msg;
+  }
+
+  async function refreshBoards() {
+    renderBoard('boardStart', 'noteStart', 'loading');
+    renderBoard('boardOver', 'noteOver', 'loading');
+    try {
+      await Board.load();
+      renderBoard('boardStart', 'noteStart');
+      renderBoard('boardOver', 'noteOver');
+    } catch (e) {
+      renderBoard('boardStart', 'noteStart', 'error');
+      renderBoard('boardOver', 'noteOver', 'error');
+    }
+  }
+
+  function syncNameUI() {
+    const has = !!Board.name();
+    $('nameBox').hidden = has;
+    $('hello').hidden = !has;
+    $('helloName').textContent = Board.name();
+  }
+
   // ---------- 상태 ----------
   const pig = { x: 0, y: 0, w: 120, h: 75, targetX: null, face: 1, bob: 0 };
   let W = 0, H = 0, DPR = 1, S = 40;
@@ -334,7 +490,7 @@
   let score = 0, lives = MAX_LIVES, best = loadBest();
   let running = false, lastT = 0, elapsed = 0, shake = 0;
   let spawnTimer = 0, letterTimer = 0, heartTimer = 0;
-  let charge = 0, vortex = 0;
+  let charge = 0, vortex = 0, level = 1;
   let bonus = 0, bonusFade = 0, got = [false, false, false];
   const keys = { left: false, right: false };
 
@@ -355,7 +511,19 @@
   // ---------- HUD ----------
   const hudCache = {};
   function setText(id, v) { if (hudCache[id] !== v) { hudCache[id] = v; $(id).textContent = v; } }
+  function checkLevel() {
+    const lv = Math.floor(score / LEVEL_STEP) + 1;
+    if (lv > level) {
+      level = lv;
+      popups = popups.filter(p => !p.text.startsWith('레벨 업'));
+      popup(W / 2, H * 0.32, `레벨 업! Lv.${level}`, '#7fe3ff', 32);
+      Sound.levelUp();
+    }
+  }
   function updateHud() {
+    if (running) checkLevel();
+    setText('level', 'Lv.' + level);
+    $('level').classList.toggle('show', running);
     setText('score', String(score));
     setText('best', String(best));
     setText('lives', '❤️'.repeat(lives) + '🖤'.repeat(MAX_LIVES - lives));
@@ -385,7 +553,7 @@
       heart:  [S * 0.95, S * 0.95],
       letter: [S * 1.05, S * 1.05]
     }[type];
-    const base = 140 + Math.min(elapsed * 6, 320);
+    const base = 150 * (1 + 0.18 * (Math.min(level, 10) - 1));
     items.push(Object.assign({
       type,
       w: size[0], h: size[1],
@@ -401,7 +569,7 @@
 
   function spawnNormal() {
     const r = Math.random();
-    if (elapsed > 8 && r < 0.16) makeItem('tax');
+    if (elapsed > 8 && r < Math.min(0.3, 0.12 + 0.03 * (level - 1))) makeItem('tax');
     else if (r > 0.93) makeItem('gold', 1.25);
     else makeItem('money');
   }
@@ -503,7 +671,7 @@
     items = []; particles = []; popups = [];
     score = 0; lives = MAX_LIVES; elapsed = 0; shake = 0;
     spawnTimer = 0.4; letterTimer = 6; heartTimer = 22;
-    charge = 0; vortex = 0; bonus = 0; got = [false, false, false];
+    charge = 0; vortex = 0; bonus = 0; got = [false, false, false]; level = 1;
     pig.x = W / 2; pig.targetX = null;
     $('startScreen').classList.add('hidden');
     $('overScreen').classList.add('hidden');
@@ -525,7 +693,24 @@
     $('bestOver').textContent = best;
     $('newBest').textContent = isNew && score > 0 ? '🎉 최고점수 갱신!' : '';
     updateHud(); updateSkill(); updateLetters();
+    $('bestStart').textContent = best;
     setTimeout(() => $('overScreen').classList.remove('hidden'), 400);
+    renderBoard('boardOver', 'noteOver', 'loading');
+    Board.submit(best).catch(() => {}).finally(refreshBoards);
+  }
+
+  // 시작 버튼: 이름이 없으면 먼저 등록 (최초 1회)
+  function onStartClick() {
+    if (!Board.name()) {
+      const n = $('nameInput').value.replace(/\s+/g, ' ').trim();
+      if (n.length < 1) { $('nameError').textContent = '이름을 입력해 주세요.'; $('nameInput').focus(); return; }
+      Board.setName(n.slice(0, 10));
+      $('nameError').textContent = '';
+      syncNameUI();
+      $('nameInput').blur();
+      if (best > 0) Board.submit(best).catch(() => {}).finally(refreshBoards);
+    }
+    start();
   }
 
   // 저금통 몸통과 아이템이 조금이라도 겹치면 획득
@@ -557,7 +742,7 @@
         updateLetters();
       }
     } else {
-      elapsed += dt; // 보너스 중에는 난이도 상승 멈춤
+      elapsed += dt;
     }
     bonusFade += ((bonus > 0 ? 1 : 0) - bonusFade) * Math.min(1, dt * 4);
 
@@ -565,7 +750,7 @@
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
       if (bonus > 0) { spawnBonus(); spawnTimer = 0.08 + Math.random() * 0.08; }
-      else { spawnNormal(); spawnTimer = Math.max(0.35, 1.1 - elapsed * 0.012) * (0.7 + Math.random() * 0.6); }
+      else { spawnNormal(); spawnTimer = Math.max(0.28, 1.0 * Math.pow(0.85, level - 1)) * (0.7 + Math.random() * 0.6); }
     }
     if (bonus <= 0) {
       letterTimer -= dt;
@@ -915,18 +1100,25 @@
   function setTarget(e) { pig.targetX = e.clientX; }
   canvas.addEventListener('pointerdown', e => { setTarget(e); try { canvas.setPointerCapture(e.pointerId); } catch (_) {} });
   canvas.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' || e.buttons || e.pressure > 0) setTarget(e); });
-  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove', e => { if (!e.target.closest('.overlay')) e.preventDefault(); }, { passive: false });
   window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') onStartClick(); return; }
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
     if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
-    if ((e.key === ' ' || e.key === 'Enter') && !running) start();
+    if ((e.key === ' ' || e.key === 'Enter') && !running) onStartClick();
     else if ((e.key === ' ' || e.key === 's' || e.key === 'ArrowUp') && running) { e.preventDefault(); useSkill(); }
   });
   window.addEventListener('keyup', e => {
     if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
     if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
   });
-  $('startBtn').addEventListener('click', start);
+  $('startBtn').addEventListener('click', onStartClick);
+  $('rename').addEventListener('click', () => {
+    $('nameInput').value = Board.name();
+    Board.setName('');
+    syncNameUI();
+    $('nameInput').focus();
+  });
   $('retryBtn').addEventListener('click', start);
   $('skillBtn').addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); useSkill(); });
   document.addEventListener('visibilitychange', () => {
@@ -943,6 +1135,8 @@
   window.addEventListener('resize', resize);
   resize();
   $('bestStart').textContent = best;
+  syncNameUI();
+  refreshBoards();
   updateHud();
   lastT = performance.now();
   requestAnimationFrame(loop);
